@@ -28,9 +28,10 @@ const plotSankey = function(data) {
 
   // 1. Construct the forces and simulate for node positions
 
-  const linkAgg = new Map();
+  const linkAgg = new Map(); // Map keyed by "source|target" with aggregated metrics
 
   data.forEach(d => {
+    // Two-stage links
     const pairs = [
       [d.WarehouseLocation, d.ShipmentProvider],
       [d.ShipmentProvider, d.Country]
@@ -60,6 +61,7 @@ const plotSankey = function(data) {
     });
   });
 
+  // Build a set of unique nodes from link endpoints
   const nodeSet = new Set();
   linkAgg.forEach((_, key) => {
     const [s, t] = key.split("|");
@@ -67,6 +69,7 @@ const plotSankey = function(data) {
     nodeSet.add(t);
   });
 
+  // Aggregate metrics at node level
   const nodeAgg = new Map();
   Array.from(nodeSet).forEach(name => {
     nodeAgg.set(name, {
@@ -77,6 +80,7 @@ const plotSankey = function(data) {
     });
   });
 
+  // Aggregate metrics at link level
   linkAgg.forEach((rec, key) => {
     const [s, t] = key.split("|");
     const addTo = (agg, rec) => {
@@ -93,7 +97,7 @@ const plotSankey = function(data) {
     addTo(nodeAgg.get(t), rec);
   });
 
-  // build nodes array embedding aggregated metrics
+  // Build nodes array from aggregated map
   const nodes = Array.from(nodeAgg.entries()).map(([name, m]) => ({
     name,
     orders: m.orders,
@@ -104,9 +108,11 @@ const plotSankey = function(data) {
 
   color.domain(nodes.map(n => n.name));
 
+  // Helper to find node index by name
   const nodeIndex = d =>
     nodes.findIndex(n => n.name === d);
 
+  // Build links array from aggregated map
   const links = [];
   linkAgg.forEach((rec, key) => {
     const [s, t] = key.split("|");
@@ -121,12 +127,14 @@ const plotSankey = function(data) {
     });
   });
 
+  // Sankey layout configuration
   const sankey = d3.sankey()
-    .nodeAlign(d3.sankeyJustify)
+    .nodeAlign(d3.sankeyJustify) // align nodes evenly across width
     .nodeWidth(18)
     .nodePadding(14)
     .extent([[20, 20], [width - 20, height - 20]]);
 
+  // Compute the Sankey layout
   const graph = sankey({
     nodes: nodes.map(d => Object.assign({}, d)),
     links: links.map(d => Object.assign({}, d))
@@ -137,6 +145,7 @@ const plotSankey = function(data) {
   let uidCounter = 0;
   const uid = (prefix = "id-") => ({ id: `${prefix}${++uidCounter}` });
 
+  // Create a linearGradient per link so the stroke can blend source -> target color
   const grads = defs.selectAll("linearGradient")
     .data(graph.links)
     .join("linearGradient")
@@ -144,10 +153,10 @@ const plotSankey = function(data) {
       .attr("gradientUnits", "userSpaceOnUse")
       .attr("x1", d => d.source.x1)
       .attr("x2", d => d.target.x0)
-      // optional: set y positions to midpoints so gradient follows vertical position
       .attr("y1", d => (d.source.y0 + d.source.y1) / 2)
       .attr("y2", d => (d.target.y0 + d.target.y1) / 2);
 
+  // Gradient starts with source color & ends with target color
   grads.append("stop")
     .attr("offset", "0%")
     .attr("stop-color", d => color(d.source.name)); // color by source
@@ -158,6 +167,7 @@ const plotSankey = function(data) {
 
   // 2. Add links to the SVG canvas
 
+  // Scale link widths based on value (average shipping cost)
   const minV = d3.min(graph.links, d => d.value);
   const maxV = d3.max(graph.links, d => d.value);
   const widthScale = d3.scaleLinear().domain([minV, maxV]).range([1, 30]);
@@ -166,13 +176,13 @@ const plotSankey = function(data) {
     .selectAll("path")
     .data(graph.links)
     .join("path")
-      .attr("d", d3.sankeyLinkHorizontal())
+      .attr("d", d3.sankeyLinkHorizontal()) // path generator for Sankey links
       .attr("fill", "none")
-      .attr("stroke", d => `url(#${d.uid.id})`)
+      .attr("stroke", d => `url(#${d.uid.id})`) // use gradient stroke
       .attr("stroke-width", d => widthScale(d.value))
       .attr("stroke-opacity", 0);
 
-  // Animation
+  // "Draw-in" animation
   link
     .attr("stroke-opacity", 0.3)
     .each(function(d, i) {
@@ -217,7 +227,7 @@ const plotSankey = function(data) {
     .style("line-height", "1.3")
     .style("display", "none");
 
-  // Interaction on link hover
+  // Interaction on link hover (show tooltip with aggregated metrics)
   link
     .on("mousemove", (event, d) => {
       d3.select(event.currentTarget).attr("stroke-opacity", 0.6);
@@ -240,7 +250,7 @@ Shipments' priorities:<br/>
       tip.style("display", "none");
     });
 
-  // Interaction on node hover
+  // Interaction on node hover (show tooltip with basic info)
   node
     .on("mousemove", (event, d) => {
       const html = `<strong>${d.name}</strong><br/>Nº of Shipments: ${d.orders || 0}`;
@@ -251,7 +261,7 @@ Shipments' priorities:<br/>
     })
     .on("mouseout", () => tip.style("display", "none"));
 
-  // Add labels to nodes
+  // Add text labels to nodes
   node.append("text")
     .attr("x", d => d.x0 - 6)
     .attr("y", d => (d.y0 + d.y1) / 2)
@@ -262,7 +272,6 @@ Shipments' priorities:<br/>
       .attr("x", d => d.x1 + 6)
       .attr("text-anchor", "start");
 
-  const stages = ["WarehouseLocation", "ShipmentProvider", "Country"];
   const labels = ["Warehouse Locations", "Delivery Services", "Customer's Countries"];
 
   const legend = d3.select("#legend")
